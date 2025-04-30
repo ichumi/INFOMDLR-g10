@@ -1,0 +1,14 @@
+# Load file
+data = scipy.io.loadmat('Xtrain.mat')
+print(data.keys())  # See available variables
+
+import torch
+
+# Extract data
+Xtrain = torch.tensor(data['Xtrain'], dtype=torch.float32)
+
+min_val = Xtrain.min(dim=0, keepdim=True).values
+max_val = Xtrain.max(dim=0, keepdim=True).values
+Xtrain_normalized = (Xtrain - min_val) / (max_val - min_val)
+
+print(Xtrain_normalized)
