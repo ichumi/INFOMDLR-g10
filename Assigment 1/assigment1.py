@@ -54,6 +54,19 @@ for lb in lookbacks:
         first_pred = pred_inv
         first_y_inv = y_inv
 
+    #Prediction
+    input_ord = scaled[-lb:].tolist() # lookback values in a list
+    next_200_preds = [] #list for the predictions
+    for _ in range(200): #loop to predict the next 200 data points
+        a_input = np.array(input_ord[-lb:]).reshape(1, lb, 1) #the used input to make predictions
+        pred = model.predict(a_input, verbose=0)[0, 0]
+        next_200_preds.append(pred)
+        input_ord.append(pred)
+
+    pred_inverse = scaler.inverse_transform(np.array(next_200_preds).reshape(-1, 1)) # transform to original values
+    print(f"\nRecursively predicted 200 data points of lookback {lb}:")
+    print(pred_inverse.flatten())
+
 # Prediction vs first
 plt.figure(figsize=(10, 4))
 plt.plot(first_y_inv, label='Actual')
