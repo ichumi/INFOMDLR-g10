@@ -5,13 +5,16 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 import matplotlib.pyplot as plt
 import scipy.io
 
+#Read mat
 mat = scipy.io.loadmat("Xtrain.mat")
 xtrain = mat['Xtrain'].squeeze()
 
 # Scale data to [0, 1]
 scaler = MinMaxScaler()
+scaled_data = scaler.fit_transform(xtrain.reshape(-1, 1)).flatten()
 scaled = scaler.fit_transform(xtrain.reshape(-1, 1)).flatten()
 
+#data pairs
 def create_dataset(series, lookback):
     X, y = [], []
     for i in range(len(series) - lookback):
@@ -19,6 +22,37 @@ def create_dataset(series, lookback):
         y.append(series[i + lookback])
     return np.array(X), np.array(y)
 
+
+#Define lookback(?(we have to cover more))
+lookback = 20
+X, y = create_dataset(scaled_data, lookback)
+X = X.reshape((X.shape[0], X.shape[1], 1))
+
+
+# Define CNN model
+model = tf.keras.Sequential([
+    tf.keras.layers.Conv1D(filters=32, kernel_size=3, activation='relu', input_shape=(lookback, 1)),
+    tf.keras.layers.MaxPooling1D(pool_size=2),
+    tf.keras.layers.Flatten(),
+    tf.keras.layers.Dense(50, activation='relu'),
+    tf.keras.layers.Dense(1)  # predict one step ahead ()
+])
+
+
+model.compile(optimizer='adam', loss='mse')
+model.fit(X, y, epochs=20, batch_size=32, verbose=0)
+
+#Reescaling 
+predic = model.predict(X)
+predic_rescaled = scaler.inverse_transform(predic) 
+y_rescaled = scaler.inverse_transform(y.reshape(-1, 1))
+
+#MSE
+mse = mean_squared_error(y_rescaled, predic_rescaled)
+mae = mean_absolute_error(y_rescaled, predic_rescaled)
+print(f"Lookback: 20 — MSE: {mse:.4f}, MAE: {mae:.4f}")
+
+#Comparing model behaviour 
 lookbacks = [5, 10, 20, 30, 50]
 results = {}
 first_lb = lookbacks[0]
@@ -27,12 +61,13 @@ first_pred, first_y_inv = None, None
 for lb in lookbacks:
     X, y = create_dataset(scaled, lb)
     X = X.reshape((X.shape[0], X.shape[1], 1))
+
     model = tf.keras.Sequential([
         # temporal patterns
         tf.keras.layers.Conv1D(filters=32, kernel_size=3, activation='relu', input_shape=(lb, 1)),
-        # Reduce sequence length, focus on strongest signals
+        # Reduce sequence length
         tf.keras.layers.MaxPooling1D(pool_size=2),
-        # Flatten vector for Dense layers
+        # Flatten vector Dense layers
         tf.keras.layers.Flatten(),
         tf.keras.layers.Dense(50, activation='relu'),
         tf.keras.layers.Dense(1)
@@ -40,6 +75,8 @@ for lb in lookbacks:
 
     model.compile(optimizer='adam', loss='mse')
     model.fit(X, y, epochs=20, batch_size=32, verbose=0)
+
+
     pred = model.predict(X)
     pred_inv = scaler.inverse_transform(pred) 
     y_inv = scaler.inverse_transform(y.reshape(-1, 1))
@@ -65,13 +102,13 @@ for lb in lookbacks:
 
     pred_inverse = scaler.inverse_transform(np.array(next_200_preds).reshape(-1, 1)) # transform to original values
     print(f"\nRecursively predicted 200 data points of lookback {lb}:")
-    print(pred_inverse.flatten())
+    print(pred_inverse.flatten())     
 
 # Prediction vs first
 plt.figure(figsize=(10, 4))
 plt.plot(first_y_inv, label='Actual')
 plt.plot(first_pred, label='Predicted', linestyle='-')
-plt.title(f'CNN Prediction vs Actual (Lookback = {first_lb})')
+plt.title(f'CNN Prediction vs Actual (Lookback = )')
 plt.xlabel('Step Time')
 plt.ylabel('Laser Value')
 plt.legend()
