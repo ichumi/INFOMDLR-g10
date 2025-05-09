@@ -5,69 +5,86 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 import matplotlib.pyplot as plt
 import scipy.io
 
-# Read mat
+# Read mat files
 mat = scipy.io.loadmat("Xtrain.mat")
 xtrain = mat['Xtrain'].squeeze()
+test_mat = scipy.io.loadmat("Xtest.mat")
+xtest = test_mat['Xtest'].squeeze()
 
 # Scale data to [0, 1]
 scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(xtrain.reshape(-1, 1)).flatten()
-scaled = scaler.fit_transform(xtrain.reshape(-1, 1)).flatten()
-
-# Data pairs
-lookback = 20
+scaled_test = scaler.transform(xtest.reshape(-1, 1)).flatten()  
 
 def create_dataset(series, lookback):
     X, y = [], []
     for i in range(len(series) - lookback):
         X.append(series[i:i + lookback])
         y.append(series[i + lookback])
-    # X = np.array(X).reshape(-1, lookback, 1)
-    # y = np.array
     return np.array(X).reshape(-1, lookback, 1), np.array(y)
-X, y = create_dataset(scaled_data, lookback)
 
-# CNN model
-model = tf.keras.Sequential([
-    tf.keras.layers.Conv1D(filters=32, kernel_size=3, activation='relu', input_shape=(lookback, 1)),
-    tf.keras.layers.MaxPooling1D(pool_size=2),
-    tf.keras.layers.Flatten(),
-    tf.keras.layers.Dense(50, activation='relu'),
-    tf.keras.layers.Dense(1)  # predict one step ahead
-])
+# Parameter tuning for lookback values between 10 and 100
+lookbacks = list(range(10, 101, 10))  # steps of 10
+best_mse = float('inf')
+best_lookback = None
+best_model = None
 
-model.compile(optimizer='adam', loss='mse')
-model.fit(X, y, epochs=20, batch_size=32, verbose=1)
+lookback_results = []
+mse_results = []
 
-# Rescaling
-pred = model.predict(X, verbose=0).reshape(-1, 1)
-y_true = y.reshape(-1, 1)
+for lookback in lookbacks:
+    X, y = create_dataset(scaled_data, lookback)
 
-pred_inv = scaler.inverse_transform(pred)
-y_inv   = scaler.inverse_transform(y_true)
+    # CNN model
+    model = tf.keras.Sequential([
+        tf.keras.layers.Conv1D(filters=32, kernel_size=3, activation='relu', input_shape=(lookback, 1)),
+        tf.keras.layers.MaxPooling1D(pool_size=2),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(50, activation='relu'),
+        tf.keras.layers.Dense(1)  # Predict one step ahead
+    ])
 
-# MSE and MAE
-mse = mean_squared_error(y_inv, pred_inv)
-mae = mean_absolute_error(y_inv, pred_inv)
-print(f"Lookback: {lookback} — MSE: {mse:.4f}, MAE: {mae:.4f}")
+    model.compile(optimizer='adam', loss='mse')
+    model.fit(X, y, epochs=20, batch_size=32) 
 
-#lookback_vals = [5, 10, 20, 30, 50]
-metrics = {lookback: (mse, mae)}
-lookbacks = sorted(metrics.keys())
-mses = [metrics[lb][0] for lb in lookbacks]
+    pred = model.predict(X, verbose = 0).reshape(-1, 1)
+    y_true = y.reshape(-1, 1)
+    pred_inv = scaler.inverse_transform(pred)
+    y_inv = scaler.inverse_transform(y_true)
 
-# Prediction
-input_ord = scaled[-lookback:].tolist()  # lookback values in a list
+    # MSE and MAE
+    mse = mean_squared_error(y_inv, pred_inv)
+    mse_results.append(mse)
+    lookback_results.append(lookback)
+
+    # Check if current model performs better
+    if mse < best_mse:
+        best_mse = mse
+        best_lookback = lookback
+        best_model = model
+
+
+print(f"Best lookback: {best_lookback}, MSE: {best_mse:.4f}")
+
+# Make predictions based on best lookback value
+input_ord = scaled_data[-best_lookback:].tolist()  # Use last `lookback` values
 next_200_preds = []  # list for the predictions
-for _ in range(200):  # loop to predict the next 200 data points
-    a_input = np.array(input_ord[-lookback:]).reshape(1, lookback, 1)  # input for prediction
-    pred = model.predict(a_input, verbose=0)[0, 0]
+for _ in range(200):  # Loop to predict the next 200 data points
+    a_input = np.array(input_ord[-best_lookback:]).reshape(1, best_lookback, 1)  # input for prediction
+    pred = best_model.predict(a_input, verbose= 0)[0, 0]
     next_200_preds.append(pred)
     input_ord.append(pred)
 
-pred_inverse = scaler.inverse_transform(np.array(next_200_preds).reshape(-1, 1))  # back to original scale
-print(f"\nRecursively predicted 200 data points of lookback {lookback}:")
-print(pred_inverse.flatten())
+pred_inverse = scaler.inverse_transform(np.array(next_200_preds).reshape(-1, 1))
+
+real_values = scaled_test[:200]
+real_values_inverse = scaler.inverse_transform(real_values.reshape(-1, 1))
+
+test_mse = mean_squared_error(real_values_inverse, pred_inverse)
+test_mae = mean_absolute_error(real_values_inverse, pred_inverse)
+
+print(f"\nTest MSE (comparison of 200 predicted points with real test values): {test_mse:.4f}")
+print(f"Test MAE (comparison of 200 predicted points with real test values): {test_mae:.4f}")
 
 #######################
 
@@ -82,9 +99,9 @@ plt.legend()
 plt.grid(True)
 plt.tight_layout()
 
-# MSE and Lookback plots
+# MSE and Lookback plot
 plt.figure(figsize=(8, 4))
-plt.plot(lookbacks, mses, marker='o')
+plt.plot(lookback_results, mse_results, marker='o')
 plt.title('MSE vs. Lookback Window Size')
 plt.xlabel('Lookback (Time Steps)')
 plt.ylabel('Mean Squared Error')
@@ -92,13 +109,14 @@ plt.grid(True)
 plt.tight_layout()
 plt.show()
 
-#Prediction plot
-plt.figure(figsize=(10, 4)) 
-plt.plot(pred_inverse, label='Predictions', color='orange') 
-plt.title(f'Prediction of next 200 data points  (Lookback={lookback})') 
-plt.xlabel('Step Time') 
-plt.ylabel('Predicted Laser Value') 
-plt.legend() 
-plt.grid(True) 
-plt.tight_layout() 
+# Prediction vs actual values plot (next 200 data points)
+plt.figure(figsize=(10, 4))
+plt.plot(pred_inverse, label='Predictions')
+plt.plot(real_values_inverse, label="Actual")
+plt.title(f'Prediction of next 200 data points (Best Lookback={best_lookback})')
+plt.xlabel('Step Time')
+plt.ylabel('Predicted Laser Value')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
 plt.show()
