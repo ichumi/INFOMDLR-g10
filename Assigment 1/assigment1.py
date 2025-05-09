@@ -92,7 +92,7 @@ print(f"Test MAE (comparison of 200 predicted points with real test values): {te
 plt.figure(figsize=(10, 4))
 plt.plot(y_inv, label='Actual')
 plt.plot(pred_inv, label='Predicted', alpha=0.7)
-plt.title(f'1-step Ahead Prediction (Lookback={lookback})')
+plt.title(f'1-step Ahead Prediction (Lookback={best_lookback})')
 plt.xlabel('Time Step')
 plt.ylabel('Laser Value')
 plt.legend()
