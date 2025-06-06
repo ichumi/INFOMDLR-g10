@@ -26,6 +26,7 @@ import tensorflow as tf
 import seaborn as sns
 import matplotlib.pyplot as plt
 import warnings
+import optuna
 
 warnings.filterwarnings("ignore")
 
@@ -109,20 +110,64 @@ def oversample_minority_classes(X, y):
         y_list.append(y_res)
     return np.concatenate(X_list, axis=0), np.concatenate(y_list, axis=0)
 
-def build_tcn_model(input_shape, num_classes):
+
+X = np.load('X_meg.npy')
+y = np.load('y_meg.npy')
+X_train, X_val, y_train, y_val = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y 
+)
+num_classes = 4
+input_shape = X_train.shape[1:]
+
+y_train_cat = to_categorical(y_train, num_classes=num_classes)
+y_val_cat = to_categorical(y_val, num_classes=num_classes)
+
+def build_tcn_model(input_shape, num_classes, filters=32, kernel_size=3, dense_units= 32):
     leaky_relu = layers.LeakyReLU(alpha=0.1)
     inputs = tf.keras.Input(shape=input_shape)
-    x = layers.Permute((2, 1))(inputs)
+    x = layers.Permute((2, 1))(inputs)  
     for dilation in [1, 2]:
-        x = layers.Conv1D(32, 3, dilation_rate=dilation, padding='causal')(x)
+        x = layers.Conv1D(filters=filters, kernel_size=kernel_size, dilation_rate=dilation, padding='causal')(x)
         x = layers.BatchNormalization()(x)
         x = leaky_relu(x)
         x = layers.Dropout(0.2)(x)
     x = layers.GlobalAveragePooling1D()(x)
-    x = layers.Dense(32)(x)
+    x = layers.Dense(dense_units)(x)
     x = leaky_relu(x)
     outputs = layers.Dense(num_classes, activation='softmax')(x)
-    return models.Model(inputs, outputs)
+    model = models.Model(inputs, outputs)
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+# Optuna tuning
+def opt_tune(trial):
+    filters = trial.suggest_categorical('filters', [16, 32, 64])
+    kernel_size = trial.suggest_categorical('kernel_size', [3, 5])
+    dense_units= trial.suggest_categorical('dense_units', [32, 64])
+    
+    model = build_tcn_model(input_shape=input_shape,
+                            num_classes=num_classes,
+                            filters=filters,
+                            kernel_size=kernel_size,
+                            dense_units= dense_units
+                            )
+    
+    tuning = model.fit(X_train, y_train_cat,
+                        validation_data=(X_val, y_val_cat),
+                        epochs=5,
+                        batch_size=32,
+                        verbose=0, shuffle=False)
+    val_acc = tuning.history['val_accuracy'][-1]
+    print(f"Trial {trial.number}: filters={filters}, kernel_size={kernel_size},dense_units={dense_units} val_accuracy={val_acc:.4f}")
+    return val_acc
+
+optuna_tune = optuna.create_study(direction='maximize')
+optuna_tune.optimize(opt_tune, n_trials=12)
+
+print("Results")
+print("The best performing hyperparameters:", optuna_tune.best_params)
+print(f"According to the highest validation accuracy receives from the trials: {optuna_tune.best_value:.4f}")
+
 
 def plot_training_curves(history):
     metrics = history.history
