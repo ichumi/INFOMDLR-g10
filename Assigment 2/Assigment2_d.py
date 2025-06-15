@@ -27,6 +27,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import warnings
 import optuna
+import matplotlib.patches as mpatches
 
 warnings.filterwarnings("ignore")
 
@@ -122,7 +123,7 @@ input_shape = X_train.shape[1:]
 y_train_cat = to_categorical(y_train, num_classes=num_classes)
 y_val_cat = to_categorical(y_val, num_classes=num_classes)
 
-def build_tcn_model(input_shape, num_classes, filters=32, kernel_size=3, dense_units= 32):
+def build_tcn_model(input_shape, num_classes, filters=64, kernel_size=5, dense_units= 64):
     leaky_relu = layers.LeakyReLU(alpha=0.1)
     inputs = tf.keras.Input(shape=input_shape)
     x = layers.Permute((2, 1))(inputs)  
@@ -139,34 +140,74 @@ def build_tcn_model(input_shape, num_classes, filters=32, kernel_size=3, dense_u
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     return model
 
-# Optuna tuning
+trials = []
+f= [] # filters
+k_z = [] # kernel size
+d_s = [] # dense units
+accuracy_values= []
+
+hyperparameters = {
+    'filters': [32, 64],
+    'kernel_size': [3, 5],
+    'dense_units': [32, 64]
+}
+#Optuna tuning
 def opt_tune(trial):
-    filters = trial.suggest_categorical('filters', [16, 32, 64])
-    kernel_size = trial.suggest_categorical('kernel_size', [3, 5])
-    dense_units= trial.suggest_categorical('dense_units', [32, 64])
+    filters = trial.suggest_categorical('filters', hyperparameters['filters'])
+    kernel_size = trial.suggest_categorical('kernel_size', hyperparameters['kernel_size'])
+    dense_units = trial.suggest_categorical('dense_units', hyperparameters['dense_units'])
     
     model = build_tcn_model(input_shape=input_shape,
                             num_classes=num_classes,
                             filters=filters,
                             kernel_size=kernel_size,
-                            dense_units= dense_units
-                            )
+                            dense_units=dense_units)
     
     tuning = model.fit(X_train, y_train_cat,
-                        validation_data=(X_val, y_val_cat),
-                        epochs=5,
-                        batch_size=32,
-                        verbose=0, shuffle=False)
-    val_acc = tuning.history['val_accuracy'][-1]
-    print(f"Trial {trial.number}: filters={filters}, kernel_size={kernel_size},dense_units={dense_units} val_accuracy={val_acc:.4f}")
-    return val_acc
+                  validation_data=(X_val, y_val_cat),
+                  epochs=5,
+                  batch_size=32,
+                  verbose=0,
+                  shuffle=False)
+    
+    validation_accuracy = tuning.history['val_accuracy'][-1]
+    
+    print(f"Trial {trial.number}: filters={filters}, kernel_size={kernel_size}, dense_units={dense_units} val_accuracy={validation_accuracy:.4f}")
 
-optuna_tune = optuna.create_study(direction='maximize')
-optuna_tune.optimize(opt_tune, n_trials=12)
+    trials.append(trial.number)
+    f.append(filters)
+    k_z.append(kernel_size)
+    d_s.append(dense_units)
+    accuracy_values.append(validation_accuracy)
+    
+    return validation_accuracy
 
-print("Results")
-print("The best performing hyperparameters:", optuna_tune.best_params)
-print(f"According to the highest validation accuracy receives from the trials: {optuna_tune.best_value:.4f}")
+test_sample = optuna.samplers.GridSampler(hyperparameters)
+optuna_tune = optuna.create_study(direction='maximize', sampler=test_sample)
+optuna_tune.optimize(opt_tune, n_trials=8)  
+
+plt.figure(figsize=(8, 5))
+bar_plot = plt.bar(trials, accuracy_values, color='lightblue')
+
+plt.xlabel('Trials')
+plt.ylabel('Validation Accuracy')
+plt.title('Accuracy per trial with combinations of hyperparameters')
+plt.grid(axis='y')
+plt.ylim(0,1)
+
+for x, bar in enumerate(bar_plot):
+    combination_param = f"f={f[x]}, k={k_z[x]}, d={d_s[x]}"
+    plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() +0.02, combination_param,
+             ha='center', fontsize=10, rotation=45)
+    legend_filter = mpatches.Patch(color='none', label='f = filter')
+    legend_kernel = mpatches.Patch(color='none', label='k = kernel_size')
+    legend_dense = mpatches.Patch(color='none', label='d = dense_units')
+
+    plt.legend(handles=[legend_filter, legend_kernel, legend_dense], loc='upper right')
+
+plt.show()
+plt.tight_layout()
+plt.show()
 
 
 def plot_training_curves(history):
